@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Zona Inflables — Sistema de Gestión</title>
+  <style>
+    :root {
+      --purple: #534AB7;
+      --purple-light: #EEEDFE;
+      --teal: #1D9E75;
+      --teal-light: #E1F5EE;
+      --amber: #BA7517;
+      --amber-light: #FAEEDA;
+      --red: #E24B4A;
+      --red-light: #FCEBEB;
+      --green: #3B6D11;
+      --green-light: #EAF3DE;
+      --blue: #185FA5;
+      --blue-light: #E6F1FB;
+      --gray: #5F5E5A;
+      --gray-light: #F1EFE8;
+      --bg: #ffffff;
+      --bg2: #F7F6F2;
+      --border: rgba(0,0,0,0.12);
+      --text: #1a1a18;
+      --text2: #5F5E5A;
+      --text3: #9c9a92;
+      --radius: 10px;
+      --radius-sm: 6px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1c1c1a; --bg2: #262624; --border: rgba(255,255,255,0.1);
+        --text: #e8e6de; --text2: #b4b2a9; --text3: #6e6c65;
+        --purple-light: #26215C; --teal-light: #04342C;
+        --amber-light: #412402; --red-light: #501313;
+        --green-light: #173404; --blue-light: #042C53; --gray-light: #2C2C2A;
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+           background: var(--bg2); color: var(--text); min-height: 100vh; }
+
+    /* ── HEADER ── */
+    header { background: var(--bg); border-bottom: 0.5px solid var(--border);
+             padding: 12px 20px; display: flex; align-items: center; justify-content: space-between;
+             position: sticky; top: 0; z-index: 100; }
+    .logo { display: flex; align-items: center; gap: 10px; }
+    .logo-icon { width: 36px; height: 36px; background: var(--purple);
+                 border-radius: 8px; display: flex; align-items: center;
+                 justify-content: center; font-size: 18px; }
+    .logo-text h1 { font-size: 15px; font-weight: 600; }
+    .logo-text p  { font-size: 11px; color: var(--text3); }
+    #clock { font-size: 18px; font-weight: 600; color: var(--purple); font-variant-numeric: tabular-nums; }
+    #dia-badge { font-size: 12px; padding: 3px 10px; border-radius: 20px; margin-left: 8px;
+                 background: var(--amber-light); color: var(--amber); display: none; }
+
+    /* ── TABS ── */
+    .tabs { display: flex; background: var(--bg); border-bottom: 0.5px solid var(--border);
+            padding: 0 16px; overflow-x: auto; gap: 0; }
+    .tab { padding: 12px 16px; font-size: 13px; cursor: pointer; color: var(--text2);
+           border-bottom: 2px solid transparent; white-space: nowrap; transition: all .15s; }
+    .tab.active { color: var(--purple); border-bottom-color: var(--purple); font-weight: 500; }
+    .tab:hover  { color: var(--text); }
+    .tab-badge  { display: inline-flex; align-items: center; justify-content: center;
+                  width: 18px; height: 18px; border-radius: 50%; font-size: 11px;
+                  background: var(--red); color: #fff; margin-left: 5px; }
+
+    /* ── MAIN ── */
+    main { padding: 16px; max-width: 900px; margin: 0 auto; }
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    /* ── PROMO BANNER ── */
+    #promo-banner { background: var(--amber-light); border: 0.5px solid #EF9F27;
+                    border-radius: var(--radius); padding: 10px 16px; margin-bottom: 14px;
+                    font-size: 13px; color: var(--amber); display: none; }
+
+    /* ── COMBOS ── */
+    .combos-row { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+    .combo-card { flex: 1; min-width: 120px; border: 1.5px solid var(--border);
+                  border-radius: var(--radius); padding: 14px; cursor: pointer;
+                  background: var(--bg); transition: all .15s; text-align: center; }
+    .combo-card:hover  { border-color: var(--purple); }
+    .combo-card.sel    { border-color: var(--purple); background: var(--purple-light); }
+    .combo-nombre { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+    .combo-precio { font-size: 22px; font-weight: 700; color: var(--purple); }
+    .combo-detalle{ font-size: 11px; color: var(--text3); margin-top: 3px; }
+
+    /* ── FORM ── */
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+    @media(max-width:540px){ .form-grid { grid-template-columns: 1fr; } }
+    .form-group { display: flex; flex-direction: column; gap: 5px; }
+    .form-group label { font-size: 12px; color: var(--text2); font-weight: 500; }
+    input, select {
+      border: 0.5px solid var(--border); border-radius: var(--radius-sm);
+      padding: 10px 12px; font-size: 14px; background: var(--bg2); color: var(--text);
+      width: 100%; outline: none; font-family: inherit; }
+    input:focus, select:focus { border-color: var(--purple); box-shadow: 0 0 0 3px rgba(83,74,183,.15); }
+
+    /* ── BOTONES ── */
+    .btn { border: 0.5px solid var(--border); border-radius: var(--radius-sm);
+           padding: 10px 18px; font-size: 13px; font-family: inherit;
+           cursor: pointer; font-weight: 500; transition: all .15s; }
+    .btn-primary { background: var(--purple); color: #fff; border-color: var(--purple); }
+    .btn-primary:hover { opacity: .88; }
+    .btn-primary:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-ghost { background: transparent; color: var(--text2); }
+    .btn-ghost:hover { background: var(--bg2); }
+    .btn-red   { background: var(--red-light); color: var(--red); border-color: var(--red); font-size:12px; padding:5px 10px; }
+    .btn-green { background: var(--green-light); color: var(--green); border-color: var(--green); font-size:12px; padding:5px 10px; }
+
+    /* ── WA PREVIEW ── */
+    .wa-wrap { display: none; margin-top: 14px; }
+    .wa-wrap p { font-size: 12px; color: var(--text3); margin-bottom: 6px; }
+    .wa-bubble { background: #dcf8c6; border-radius: 12px 12px 3px 12px; padding: 12px 14px;
+                 font-size: 13px; line-height: 1.6; color: #1a3a1a; max-width: 360px;
+                 white-space: pre-wrap; border: 0.5px solid #b2dfb2; }
+    .wa-bubble strong { font-weight: 600; }
+
+    /* ── CARDS ACTIVOS ── */
+    .kpi-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
+    @media(min-width:600px){ .kpi-row { grid-template-columns: repeat(4, 1fr); } }
+    .kpi { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius);
+           padding: 12px 14px; }
+    .kpi-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing:.04em; }
+    .kpi-val   { font-size: 24px; font-weight: 600; margin-top: 2px; }
+    .kpi-sub   { font-size: 11px; color: var(--teal); margin-top: 2px; }
+
+    .cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px,1fr)); gap: 10px; }
+    .card-nino  { background: var(--bg); border: 0.5px solid var(--border);
+                  border-radius: var(--radius); padding: 14px; }
+    .card-nino.warn { border-color: #EF9F27; background: var(--amber-light); }
+    .card-nino.urg  { border-color: var(--red); background: var(--red-light); }
+    .card-nombre { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
+    .card-sub    { font-size: 12px; color: var(--text2); margin-bottom: 8px; }
+    .bar-wrap    { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-bottom: 8px; }
+    .bar-fill    { height: 100%; border-radius: 3px; transition: width .8s, background .5s; }
+    .card-footer { display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .timer-num   { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .card-times  { font-size: 11px; color: var(--text3); margin-top: 6px; }
+
+    /* ── MODAL EXTENDER ── */
+    .modal-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4);
+                z-index: 200; align-items: center; justify-content: center; }
+    .modal-bg.open { display: flex; }
+    .modal { background: var(--bg); border-radius: var(--radius); padding: 20px;
+             width: 90%; max-width: 360px; }
+    .modal h3 { font-size: 15px; margin-bottom: 14px; }
+
+    /* ── HISTORIAL ── */
+    .hist-row { display: flex; gap: 10px; align-items: center; padding: 10px 12px;
+                background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-sm);
+                margin-bottom: 6px; }
+    .hist-nombre { font-size: 13px; font-weight: 500; flex: 1; }
+    .hist-combo  { font-size: 12px; color: var(--text2); }
+    .hist-precio { font-size: 13px; font-weight: 600; color: var(--purple); }
+    .hist-pago   { font-size: 11px; padding: 2px 8px; border-radius: 20px; }
+    .pago-ef     { background: var(--green-light); color: var(--green); }
+    .pago-tr     { background: var(--blue-light); color: var(--blue); }
+
+    /* ── EMPTY ── */
+    .empty { text-align: center; padding: 40px 20px; color: var(--text3); font-size: 14px; }
+
+    /* ── TOAST ── */
+    #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(80px);
+             background: #1a1a18; color: #fff; padding: 10px 20px; border-radius: 20px;
+             font-size: 13px; transition: transform .3s; z-index: 300; pointer-events: none; }
+    #toast.show { transform: translateX(-50%) translateY(0); }
+
+    /* ── SECCION TITULO ── */
+    .sec-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--text); }
+    .sec-sub   { font-size: 12px; color: var(--text3); margin-top: -8px; margin-bottom: 12px; }
+
+    /* ── SEPARADOR ── */
+    hr { border: none; border-top: 0.5px solid var(--border); margin: 16px 0; }
+  </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">🎪</div>
+    <div class="logo-text">
+      <h1>Zona Inflables</h1>
+      <p>Sistema de gestión</p>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center">
+    <span id="clock">--:--</span>
+    <span id="dia-badge">🎉 Sábado 2x1</span>
+  </div>
+</header>
+
+<!-- TABS -->
+<div class="tabs">
+  <div class="tab active" onclick="tab('registro')">➕ Registrar</div>
+  <div class="tab" id="tab-activos" onclick="tab('activos')">
+    🎪 Activos <span class="tab-badge" id="badge-n" style="display:none">0</span>
+  </div>
+  <div class="tab" onclick="tab('reporte')">📊 Reporte</div>
+  <div class="tab" onclick="tab('config')">⚙️ Config</div>
+</div>
+
+<!-- MAIN -->
+<main>
+
+  <!-- ══ PANEL REGISTRO ══ -->
+  <div class="panel active" id="panel-registro">
+    <div id="promo-banner">🎉 <strong>¡Hoy es sábado!</strong> Promo 2x1 activa — Combo 1 hora: paga 1, entran 2.</div>
+
+    <div class="sec-title">Selecciona el combo</div>
+    <div class="combos-row">
+      <div class="combo-card" id="cc1" onclick="selCombo(1)">
+        <div class="combo-nombre">15 min</div>
+        <div class="combo-precio">$5.000</div>
+        <div class="combo-detalle">1 juego a elección</div>
+      </div>
+      <div class="combo-card" id="cc2" onclick="selCombo(2)">
+        <div class="combo-nombre">30 min</div>
+        <div class="combo-precio">$8.000</div>
+        <div class="combo-detalle">2 juegos · Combo</div>
+      </div>
+      <div class="combo-card" id="cc3" onclick="selCombo(3)">
+        <div class="combo-nombre">1 hora</div>
+        <div class="combo-precio">$13.000</div>
+        <div class="combo-detalle">4 juegos · Combo</div>
+      </div>
+    </div>
+
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Nombre del niño *</label>
+        <input id="f-nombre" type="text" placeholder="Ej: Mateo García" oninput="updatePreview()">
+      </div>
+      <div class="form-group">
+        <label>Teléfono acudiente (WhatsApp) *</label>
+        <input id="f-tel" type="tel" placeholder="3001234567" maxlength="10">
+      </div>
+      <div class="form-group">
+        <label>Nombre acudiente</label>
+        <input id="f-acudiente" type="text" placeholder="Ej: Laura García" oninput="updatePreview()">
+      </div>
+      <div class="form-group">
+        <label>Método de pago</label>
+        <select id="f-pago">
+          <option value="Efectivo">💵 Efectivo</option>
+          <option value="Nequi">📱 Nequi</option>
+          <option value="Daviplata">📱 Daviplata</option>
+          <option value="Transferencia">🏦 Transferencia</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="wa-wrap" id="wa-wrap">
+      <p>📱 Vista previa del mensaje WhatsApp:</p>
+      <div class="wa-bubble" id="wa-preview"></div>
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:14px;align-items:center;flex-wrap:wrap">
+      <button class="btn btn-primary" id="btn-registrar" onclick="registrar()">
+        ✅ Registrar y enviar WhatsApp
+      </button>
+      <button class="btn btn-ghost" onclick="limpiar()">Limpiar</button>
+      <span id="err" style="font-size:12px;color:var(--red)"></span>
+    </div>
+  </div>
+
+  <!-- ══ PANEL ACTIVOS ══ -->
+  <div class="panel" id="panel-activos">
+    <div class="kpi-row">
+      <div class="kpi">
+        <div class="kpi-label">Activos ahora</div>
+        <div class="kpi-val" id="k-activos">0</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Atendidos hoy</div>
+        <div class="kpi-val" id="k-total">0</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Ingresos hoy</div>
+        <div class="kpi-val" id="k-ingresos">$0</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Efectivo / Transfer</div>
+        <div class="kpi-val" id="k-pago" style="font-size:14px;padding-top:4px">—</div>
+      </div>
+    </div>
+    <div class="cards-grid" id="cards"></div>
+  </div>
+
+  <!-- ══ PANEL REPORTE ══ -->
+  <div class="panel" id="panel-reporte">
+    <div class="sec-title">Historial del día</div>
+    <div id="hist-lista"></div>
+  </div>
+
+  <!-- ══ PANEL CONFIG ══ -->
+  <div class="panel" id="panel-config">
+    <div class="sec-title">Configuración del sistema</div>
+    <div class="sec-sub">Estas opciones las configura el administrador una sola vez.</div>
+    <div style="background:var(--bg);border:0.5px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px">
+      <p style="font-size:13px;font-weight:600;margin-bottom:12px">Conexión WhatsApp (Twilio)</p>
+      <div class="form-group" style="margin-bottom:10px">
+        <label>Account SID</label>
+        <input id="cfg-sid" type="text" placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+      </div>
+      <div class="form-group" style="margin-bottom:10px">
+        <label>Auth Token</label>
+        <input id="cfg-token" type="password" placeholder="Tu auth token de Twilio">
+      </div>
+      <div class="form-group" style="margin-bottom:14px">
+        <label>Número Twilio WhatsApp</label>
+        <input id="cfg-num" type="text" placeholder="whatsapp:+14155238886">
+      </div>
+      <button class="btn btn-primary" onclick="guardarConfig()">Guardar configuración</button>
+    </div>
+    <div style="background:var(--blue-light);border-radius:var(--radius);padding:14px;font-size:13px;color:var(--blue);line-height:1.7">
+      <strong>📋 Pasos para activar WhatsApp real:</strong><br>
+      1. Crea cuenta en <strong>twilio.com</strong> (gratis)<br>
+      2. Ve a Messaging → Try it out → Send a WhatsApp message<br>
+      3. Activa el sandbox: envía <strong>"join [palabra]"</strong> al número que te dan<br>
+      4. Copia Account SID y Auth Token desde el dashboard<br>
+      5. Pégalos aquí y guarda<br>
+      6. ¡Listo! Los mensajes llegarán de verdad 🎉
+    </div>
+  </div>
+
+</main>
+
+<!-- MODAL EXTENDER -->
+<div class="modal-bg" id="modal-ext">
+  <div class="modal">
+    <h3>Extender tiempo para <span id="ext-nombre"></span></h3>
+    <div class="form-group" style="margin-bottom:14px">
+      <label>Nuevo combo</label>
+      <select id="ext-combo">
+        <option value="1">15 minutos — $5.000</option>
+        <option value="2">30 minutos — $8.000</option>
+        <option value="3">1 hora — $13.000</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary" onclick="confirmarExtender()">Confirmar extensión</button>
+      <button class="btn btn-ghost" onclick="cerrarModal()">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════════
+//  Estado local
+// ═══════════════════════════════════════════════
+const COMBOS = {
+  1:{nombre:'15 minutos', minutos:15, precio:5000, juegos:'1 juego a elección'},
+  2:{nombre:'30 minutos', minutos:30, precio:8000, juegos:'2 juegos a elección'},
+  3:{nombre:'1 hora',     minutos:60, precio:13000, juegos:'4 juegos (todos)'},
+};
+let comboSel = null;
+let activos  = [];
+let historial = [];
+let extNinoId = null;
+
+// ═══════════════════════════════════════════════
+//  Reloj
+// ═══════════════════════════════════════════════
+function tickClock() {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});
+}
+setInterval(tickClock, 1000);
+tickClock();
+
+// Sábado
+if (new Date().getDay() === 6) {
+  document.getElementById('promo-banner').style.display = 'block';
+  document.getElementById('dia-badge').style.display    = 'inline';
+}
+
+// ═══════════════════════════════════════════════
+//  Tabs
+// ═══════════════════════════════════════════════
+function tab(id) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  const tabs = ['registro','activos','reporte','config'];
+  document.querySelectorAll('.tab')[tabs.indexOf(id)].classList.add('active');
+  document.getElementById('panel-'+id).classList.add('active');
+  if (id === 'activos') renderActivos();
+  if (id === 'reporte') renderHistorial();
+}
+
+// ═══════════════════════════════════════════════
+//  Selección de combo
+// ═══════════════════════════════════════════════
+function selCombo(n) {
+  comboSel = n;
+  document.querySelectorAll('.combo-card').forEach(c => c.classList.remove('sel'));
+  document.getElementById('cc'+n).classList.add('sel');
+  updatePreview();
+}
+
+// ═══════════════════════════════════════════════
+//  Vista previa WhatsApp
+// ═══════════════════════════════════════════════
+function addMins(m) {
+  const d = new Date(); d.setMinutes(d.getMinutes()+m);
+  return d.toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});
+}
+function hn() { return new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'}); }
+function pesos(n) { return '$'+n.toLocaleString('es-CO'); }
+
+function updatePreview() {
+  if (!comboSel) { document.getElementById('wa-wrap').style.display='none'; return; }
+  const nombre    = document.getElementById('f-nombre').value || '[nombre del niño]';
+  const acudiente = document.getElementById('f-acudiente').value || 'acudiente';
+  const c = COMBOS[comboSel];
+  const salida = addMins(c.minutos);
+  const esSab  = new Date().getDay()===6;
+  let txt = `🎪 *Zona Inflables — Bienvenida*\n\nHola ${acudiente} 👋\n\n*${nombre}* acaba de ingresar al parque.\n\n⏱ *Combo:* ${c.nombre} — ${c.juegos}\n🕐 *Ingreso:* ${hn()}\n🕐 *Salida:* ${salida}\n💰 *Valor:* ${pesos(c.precio)}`;
+  if (esSab && comboSel===3) txt += '\n\n🎁 *Promo sábado 2x1 aplicada.*';
+  // Bold markdown simple
+  const html = txt.replace(/\*(.*?)\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>');
+  document.getElementById('wa-preview').innerHTML = html;
+  document.getElementById('wa-wrap').style.display = 'block';
+}
+
+// ═══════════════════════════════════════════════
+//  Registrar niño → llama al servidor
+// ═══════════════════════════════════════════════
+async function registrar() {
+  const nombre    = document.getElementById('f-nombre').value.trim();
+  const telefono  = document.getElementById('f-tel').value.trim();
+  const acudiente = document.getElementById('f-acudiente').value.trim();
+  const pago      = document.getElementById('f-pago').value;
+  const err       = document.getElementById('err');
+
+  if (!nombre)    { err.textContent='⚠ Ingresa el nombre del niño.'; return; }
+  if (!telefono)  { err.textContent='⚠ Ingresa el teléfono del acudiente.'; return; }
+  if (!comboSel)  { err.textContent='⚠ Selecciona un combo.'; return; }
+  err.textContent = '';
+
+  const btn = document.getElementById('btn-registrar');
+  btn.disabled = true;
+  btn.textContent = 'Enviando...';
+
+  try {
+    const res = await fetch('/api/registrar', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ nombre, acudiente, telefono, combo: comboSel, pago }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      toast(`✅ ${nombre} registrado. WhatsApp enviado a ${telefono}`);
+      historial.push({ nombre, acudiente, telefono, combo: comboSel, pago,
+                       entrada: new Date(), salida: new Date(data.salida) });
+      await cargarActivos();
+      actualizarKPIs();
+      limpiar();
+      tab('activos');
+    } else {
+      err.textContent = '❌ ' + data.error;
+    }
+  } catch(e) {
+    // Si no hay servidor (demo local), simula registro
+    const id = Date.now();
+    const entrada = new Date();
+    const salida  = new Date(entrada.getTime() + COMBOS[comboSel].minutos*60000);
+    activos.push({ id, nombre, acudiente, telefono, combo: comboSel, pago, entrada, salida });
+    historial.push({ id, nombre, acudiente, telefono, combo: comboSel, pago, entrada, salida });
+    toast(`✅ ${nombre} registrado (modo demo — sin servidor)`);
+    actualizarKPIs();
+    limpiar();
+    tab('activos');
+  }
+
+  btn.disabled = false;
+  btn.textContent = '✅ Registrar y enviar WhatsApp';
+}
+
+// ═══════════════════════════════════════════════
+//  Cargar activos desde servidor
+// ═══════════════════════════════════════════════
+async function cargarActivos() {
+  try {
+    const res = await fetch('/api/activos');
+    const data = await res.json();
+    activos = data.map(n => ({...n, entrada: new Date(n.entrada), salida: new Date(n.salida)}));
+  } catch(e) {
+    // modo demo: activos ya en memoria
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  Retirar niño
+// ═══════════════════════════════════════════════
+async function retirar(id) {
+  try {
+    await fetch('/api/retirar', { method:'POST', headers:{'Content-Type':'application/json'},
+                                  body: JSON.stringify({id}) });
+  } catch(e) {}
+  activos = activos.filter(n => n.id !== id);
+  toast('👋 Niño retirado. Mensaje de despedida enviado.');
+  actualizarKPIs();
+  renderActivos();
+}
+
+// ═══════════════════════════════════════════════
+//  Extender tiempo
+// ═══════════════════════════════════════════════
+function abrirExtender(id) {
+  extNinoId = id;
+  const n = activos.find(x => x.id === id);
+  document.getElementById('ext-nombre').textContent = n ? n.nombre : '';
+  document.getElementById('modal-ext').classList.add('open');
+}
+function cerrarModal() {
+  document.getElementById('modal-ext').classList.remove('open');
+  extNinoId = null;
+}
+async function confirmarExtender() {
+  const combo = Number(document.getElementById('ext-combo').value);
+  try {
+    await fetch('/api/extender', { method:'POST', headers:{'Content-Type':'application/json'},
+                                   body: JSON.stringify({id: extNinoId, combo}) });
+  } catch(e) {
+    // demo
+    const n = activos.find(x => x.id === extNinoId);
+    if (n) {
+      n.combo  = combo;
+      n.entrada = new Date();
+      n.salida  = new Date(Date.now() + COMBOS[combo].minutos*60000);
+    }
+  }
+  cerrarModal();
+  await cargarActivos();
+  toast('⏱ Tiempo extendido. WhatsApp enviado.');
+  renderActivos();
+}
+
+// ═══════════════════════════════════════════════
+//  Render tarjetas activos
+// ═══════════════════════════════════════════════
+function renderActivos() {
+  const cont = document.getElementById('cards');
+  if (!activos.length) {
+    cont.innerHTML = '<div class="empty">No hay niños activos en este momento.<br>Registra el próximo ingreso ➕</div>';
+    return;
+  }
+  cont.innerHTML = activos.map(n => {
+    const ahora  = Date.now();
+    const total  = COMBOS[n.combo].minutos * 60000;
+    const restMs = new Date(n.salida) - ahora;
+    const restMin = Math.max(0, Math.ceil(restMs / 60000));
+    const pct    = Math.max(0, Math.min(100, restMs / total * 100));
+    const urg    = restMin <= 2;
+    const warn   = restMin <= 5 && restMin > 2;
+    const color  = urg ? 'var(--red)' : warn ? '#EF9F27' : 'var(--teal)';
+    const horaE  = new Date(n.entrada).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});
+    const horaS  = new Date(n.salida).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});
+    return `<div class="card-nino ${urg?'urg':warn?'warn':''}">
+      <div class="card-nombre">${n.nombre}</div>
+      <div class="card-sub">${COMBOS[n.combo].nombre} · ${n.pago}</div>
+      <div class="bar-wrap"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div>
+      <div class="card-footer">
+        <span class="timer-num" style="color:${color}">⏱ ${restMin} min</span>
+        <div style="display:flex;gap:5px">
+          <button class="btn btn-green" onclick="abrirExtender(${n.id})">+Tiempo</button>
+          <button class="btn btn-red"   onclick="retirar(${n.id})">Retirar</button>
+        </div>
+      </div>
+      <div class="card-times">${horaE} → ${horaS}</div>
+    </div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════
+//  Render historial
+// ═══════════════════════════════════════════════
+function renderHistorial() {
+  const cont = document.getElementById('hist-lista');
+  if (!historial.length) {
+    cont.innerHTML = '<div class="empty">No hay registros hoy aún.</div>';
+    return;
+  }
+  cont.innerHTML = [...historial].reverse().map(n => {
+    const c = COMBOS[n.combo];
+    const h = new Date(n.entrada).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});
+    const esTr = n.pago !== 'Efectivo';
+    return `<div class="hist-row">
+      <span style="font-size:18px">👦</span>
+      <div style="flex:1">
+        <div class="hist-nombre">${n.nombre}</div>
+        <div class="hist-combo">${c.nombre} · ${h}</div>
+      </div>
+      <span class="hist-precio">${pesos(c.precio)}</span>
+      <span class="hist-pago ${esTr?'pago-tr':'pago-ef'}">${n.pago}</span>
+    </div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════
+//  KPIs
+// ═══════════════════════════════════════════════
+function actualizarKPIs() {
+  const total    = historial.length;
+  const ingresos = historial.reduce((s,n) => s + COMBOS[n.combo].precio, 0);
+  const ef       = historial.filter(n => n.pago==='Efectivo').length;
+  const tr       = total - ef;
+  document.getElementById('k-activos').textContent  = activos.length;
+  document.getElementById('k-total').textContent    = total;
+  document.getElementById('k-ingresos').textContent = pesos(ingresos);
+  document.getElementById('k-pago').textContent     = total ? `${ef} Ef / ${tr} Tr` : '—';
+  const badge = document.getElementById('badge-n');
+  badge.style.display = activos.length ? 'inline-flex' : 'none';
+  badge.textContent   = activos.length;
+  document.getElementById('tab-activos').querySelector('span') ||
+    (document.getElementById('badge-activos') && (document.getElementById('badge-activos').textContent = activos.length));
+}
+
+// ═══════════════════════════════════════════════
+//  Limpiar formulario
+// ═══════════════════════════════════════════════
+function limpiar() {
+  document.getElementById('f-nombre').value    = '';
+  document.getElementById('f-tel').value       = '';
+  document.getElementById('f-acudiente').value = '';
+  document.getElementById('f-pago').value      = 'Efectivo';
+  comboSel = null;
+  document.querySelectorAll('.combo-card').forEach(c => c.classList.remove('sel'));
+  document.getElementById('wa-wrap').style.display = 'none';
+  document.getElementById('err').textContent = '';
+}
+
+// ═══════════════════════════════════════════════
+//  Config guardar (solo UI)
+// ═══════════════════════════════════════════════
+function guardarConfig() {
+  toast('⚙️ Configuración guardada. Reinicia el servidor para aplicar.');
+}
+
+// ═══════════════════════════════════════════════
+//  Toast
+// ═══════════════════════════════════════════════
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3500);
+}
+
+// ═══════════════════════════════════════════════
+//  Auto-refresh activos cada 15 seg
+// ═══════════════════════════════════════════════
+setInterval(async () => {
+  await cargarActivos();
+  if (document.getElementById('panel-activos').classList.contains('active')) {
+    renderActivos();
+    actualizarKPIs();
+  }
+}, 15000);
+
+// Inicial
+actualizarKPIs();
+</script>
+</body>
+</html>
