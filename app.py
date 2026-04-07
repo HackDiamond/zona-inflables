@@ -5,12 +5,22 @@
 
 from flask import Flask, request, jsonify, send_from_directory
 from twilio.rest import Client as TwilioClient
-from datetime import datetime, timedelta
+from twilio.request_validator import RequestValidator
+from datetime import datetime, timedelta, date
+from calendar import monthrange
 from supabase import create_client
 import anthropic
 import threading
+import logging
 import os
 import json
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+)
+log = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder='public', static_url_path='')
 
@@ -28,8 +38,9 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL else None
 claude   = anthropic.Anthropic(api_key=ANTHROPIC_KEY) if ANTHROPIC_KEY else None
 
 # ── Estado en memoria ──
-ninos_activos   = {}   # id -> grupo activo
-timers          = {}   # id -> [timers]
+_lock           = threading.Lock()
+ninos_activos   = {}   # id -> grupo activo  (acceso siempre bajo _lock)
+timers          = {}   # id -> [timers]       (acceso siempre bajo _lock)
 conversaciones  = {}   # telefono -> [historial mensajes para el agente]
 
 # ── Catálogo ──
@@ -50,10 +61,12 @@ def get_system_prompt(telefono):
     """Genera el prompt del agente con contexto en tiempo real."""
 
     # Buscar si hay niños activos de este número
-    grupo_activo = next(
-        (g for g in ninos_activos.values() if telefono in g['telefono'].replace(' ','')),
-        None
-    )
+    with _lock:
+        grupo_activo = next(
+            (g for g in ninos_activos.values()
+             if normalizar_telefono(g['telefono']) == normalizar_telefono(telefono)),
+            None,
+        )
 
     # Buscar historial del cliente en Supabase
     historial_cliente = ''
@@ -68,8 +81,8 @@ def get_system_prompt(telefono):
                     f"- Total gastado: ${c['total_gastado']:,}\n"
                     f"- Última visita: {c.get('ultimo_visita','')[:10]}"
                 )
-        except:
-            pass
+        except Exception as e:
+            log.error('[SYSTEM PROMPT CLIENTE] %s', e)
 
     # Estado del niño activo
     estado_activo = ''
@@ -150,50 +163,64 @@ Cada cotización es personalizada. Para cotizar un evento, solicita: fecha, luga
 
 def hora_legible(dt):
     if isinstance(dt, str):
-        dt = datetime.fromisoformat(dt.replace('Z','+00:00'))
+        dt = datetime.fromisoformat(dt.replace('Z', '+00:00'))
     return dt.strftime('%I:%M %p')
 
 def es_sabado():
     return datetime.now().weekday() == 5
 
 def pesos(n):
-    return f'${int(n or 0):,}'.replace(',','.')
+    return f'${int(n or 0):,}'.replace(',', '.')
+
+def normalizar_telefono(raw: str) -> str:
+    """Devuelve número limpio con prefijo +57 si aplica (sin whatsapp:)."""
+    num = raw.replace('whatsapp:', '').replace(' ', '').replace('-', '')
+    num = num.lstrip('+')
+    if num.startswith('57') and len(num) > 10:
+        num = num[2:]
+    return '+57' + num.lstrip('0') if not num.startswith('+') else '+' + num
 
 def enviar_wa(telefono, mensaje):
+    num = normalizar_telefono(telefono)
     if not twilio:
-        print(f'[WA DEMO → {telefono}]: {mensaje[:60]}')
+        log.info('[WA DEMO → %s]: %s', num, mensaje[:60])
         return {'ok': True}
     try:
-        num = telefono.replace(' ','').replace('-','')
-        if not num.startswith('+'): num = '+57' + num.lstrip('0')
         msg = twilio.messages.create(from_=TWILIO_NUMBER, to=f'whatsapp:{num}', body=mensaje)
         return {'ok': True, 'sid': msg.sid}
     except Exception as e:
-        print(f'[WA ERROR] {e}')
+        log.error('[WA ERROR] %s', e)
         return {'ok': False, 'error': str(e)}
 
 def sb_insert(tabla, data):
-    if not supabase: return None
-    try: return supabase.table(tabla).insert(data).execute()
-    except Exception as e: print(f'[DB INSERT {tabla}] {e}')
+    if not supabase:
+        return None
+    try:
+        return supabase.table(tabla).insert(data).execute()
+    except Exception as e:
+        log.error('[DB INSERT %s] %s', tabla, e)
 
 def sb_update(tabla, data, match):
-    if not supabase: return None
+    if not supabase:
+        return None
     try:
         q = supabase.table(tabla).update(data)
-        for k,v in match.items(): q = q.eq(k,v)
+        for k, v in match.items():
+            q = q.eq(k, v)
         return q.execute()
-    except Exception as e: print(f'[DB UPDATE {tabla}] {e}')
+    except Exception as e:
+        log.error('[DB UPDATE %s] %s', tabla, e)
 
 def registrar_cliente_db(telefono, nombre, precio):
-    if not supabase: return
+    if not supabase:
+        return
     try:
         res = supabase.table('clientes').select('*').eq('telefono', telefono).execute()
         if res.data:
             c = res.data[0]
             supabase.table('clientes').update({
-                'visitas': c['visitas']+1,
-                'total_gastado': c['total_gastado']+precio,
+                'visitas': c['visitas'] + 1,
+                'total_gastado': c['total_gastado'] + precio,
                 'ultimo_visita': datetime.now().isoformat(),
             }).eq('telefono', telefono).execute()
         else:
@@ -202,33 +229,45 @@ def registrar_cliente_db(telefono, nombre, precio):
                 'visitas': 1, 'total_gastado': precio,
                 'ultimo_visita': datetime.now().isoformat(),
             }).execute()
-    except Exception as e: print(f'[DB CLIENTE] {e}')
+    except Exception as e:
+        log.error('[DB CLIENTE] %s', e)
 
 def descontar_inventario_db(servicio, ninos_lista):
-    if not supabase: return
+    if not supabase:
+        return
     try:
-        srv = SERVICIOS.get(servicio,{})
+        srv = SERVICIOS.get(servicio, {})
         if srv.get('manilla'):
-            res = supabase.table('inventario').select('cantidad').eq('producto','manillas').execute()
+            res = supabase.table('inventario').select('cantidad').eq('producto', 'manillas').execute()
             if res.data:
                 nueva = max(0, res.data[0]['cantidad'] - len(ninos_lista))
-                supabase.table('inventario').update({'cantidad':nueva,'updated_at':datetime.now().isoformat()}).eq('producto','manillas').execute()
+                supabase.table('inventario').update(
+                    {'cantidad': nueva, 'updated_at': datetime.now().isoformat()}
+                ).eq('producto', 'manillas').execute()
         for n in ninos_lista:
             if n.get('dibujo'):
                 p = f"dibujo_{n['dibujo'].lower().strip()}"
-                res = supabase.table('inventario').select('cantidad').eq('producto',p).execute()
+                res = supabase.table('inventario').select('cantidad').eq('producto', p).execute()
                 if res.data:
-                    nueva = max(0, res.data[0]['cantidad']-1)
-                    supabase.table('inventario').update({'cantidad':nueva,'updated_at':datetime.now().isoformat()}).eq('producto',p).execute()
-    except Exception as e: print(f'[DB INV] {e}')
+                    nueva = max(0, res.data[0]['cantidad'] - 1)
+                    supabase.table('inventario').update(
+                        {'cantidad': nueva, 'updated_at': datetime.now().isoformat()}
+                    ).eq('producto', p).execute()
+    except Exception as e:
+        log.error('[DB INV] %s', e)
 
 def alertas_stock_db():
-    if not supabase: return []
+    if not supabase:
+        return []
     try:
         res = supabase.table('inventario').select('*').execute()
-        return [f"⚠️ {r['producto']}: solo {r['cantidad']} disponibles"
-                for r in (res.data or []) if r['cantidad'] <= r['umbral_alerta']]
-    except: return []
+        return [
+            f"⚠️ {r['producto']}: solo {r['cantidad']} disponibles"
+            for r in (res.data or []) if r['cantidad'] <= r['umbral_alerta']
+        ]
+    except Exception as e:
+        log.error('[DB ALERTAS] %s', e)
+        return []
 
 
 # ================================================================
@@ -296,29 +335,76 @@ def msg_despedida(g):
 # ================================================================
 
 def programar_alertas(gid):
-    g = ninos_activos.get(gid)
-    if not g or not g.get('salida'): return
+    with _lock:
+        g = ninos_activos.get(gid)
+    if not g or not g.get('salida'):
+        return
     ahora  = datetime.now()
     salida = g['salida'] if isinstance(g['salida'], datetime) else datetime.fromisoformat(str(g['salida']))
     seg_total = (salida - ahora).total_seconds()
     seg_aviso = seg_total - 300
 
     def aviso():
-        grp = ninos_activos.get(gid)
-        if grp: enviar_wa(grp['telefono'], msg_aviso(grp))
+        with _lock:
+            grp = ninos_activos.get(gid)
+        if grp:
+            enviar_wa(grp['telefono'], msg_aviso(grp))
 
     def fin():
-        grp = ninos_activos.get(gid)
-        if grp: enviar_wa(grp['telefono'], msg_fin(grp))
+        with _lock:
+            grp = ninos_activos.get(gid)
+        if grp:
+            enviar_wa(grp['telefono'], msg_fin(grp))
 
     tlist = []
     if seg_aviso > 0:
-        t = threading.Timer(seg_aviso, aviso); t.start(); tlist.append(t)
-    t2 = threading.Timer(max(seg_total,1), fin); t2.start(); tlist.append(t2)
-    timers[gid] = tlist
+        t = threading.Timer(seg_aviso, aviso)
+        t.daemon = True
+        t.start()
+        tlist.append(t)
+    t2 = threading.Timer(max(seg_total, 1), fin)
+    t2.daemon = True
+    t2.start()
+    tlist.append(t2)
+    with _lock:
+        timers[gid] = tlist
 
 def cancelar_timers(gid):
-    for t in timers.pop(gid, []): t.cancel()
+    with _lock:
+        tlist = timers.pop(gid, [])
+    for t in tlist:
+        t.cancel()
+
+def cargar_sesiones_activas():
+    """Al arrancar, recarga sesiones activas de Supabase para no perder estado."""
+    if not supabase:
+        return
+    try:
+        res = supabase.table('registros').select('*').eq('activo', True).execute()
+        count = 0
+        for r in (res.data or []):
+            salida = None
+            if r.get('salida'):
+                salida = datetime.fromisoformat(r['salida'].replace('Z', '+00:00')).replace(tzinfo=None)
+                if salida < datetime.now():
+                    # Sesión expirada: marcar como inactiva
+                    sb_update('registros', {'activo': False}, {'id': r['id']})
+                    continue
+            ninos = r['ninos'] if isinstance(r['ninos'], list) else json.loads(r.get('ninos') or '[]')
+            grupo = {
+                'id': r['id'], 'servicio': r['servicio'], 'acudiente': r.get('acudiente', ''),
+                'telefono': r['telefono'], 'pago': r.get('pago', 'Efectivo'), 'ninos': ninos,
+                'precio_total': r.get('precio_total', 0),
+                'entrada': datetime.fromisoformat(r['entrada'].replace('Z', '+00:00')).replace(tzinfo=None),
+                'salida': salida, 'activo': True,
+            }
+            with _lock:
+                ninos_activos[r['id']] = grupo
+            programar_alertas(r['id'])
+            count += 1
+        log.info('Sesiones activas recuperadas de BD: %d', count)
+    except Exception as e:
+        log.error('[STARTUP RECOVERY] %s', e)
 
 
 # ================================================================
@@ -360,7 +446,7 @@ def respuesta_agente(telefono, mensaje_usuario):
         return respuesta
 
     except Exception as e:
-        print(f'[AGENTE ERROR] {e}')
+        log.error('[AGENTE ERROR] %s', e)
         return "Hola 👋 En este momento no puedo procesar tu mensaje. Por favor visítanos en el parque o escribe de nuevo en un momento."
 
 
@@ -403,7 +489,8 @@ def registrar():
         'telefono': telefono, 'pago': pago, 'ninos': ninos,
         'precio_total': precio_total, 'entrada': ahora, 'salida': salida, 'activo': True,
     }
-    ninos_activos[gid] = grupo
+    with _lock:
+        ninos_activos[gid] = grupo
 
     sb_insert('registros', {
         'id': gid, 'servicio': servicio, 'acudiente': acudiente,
@@ -424,53 +511,66 @@ def registrar():
 
 @app.route('/api/retirar', methods=['POST'])
 def retirar():
-    gid   = request.json.get('id')
-    grupo = ninos_activos.pop(gid, None)
-    if not grupo: return jsonify({'ok':False,'error':'No encontrado'}), 404
+    gid = request.json.get('id')
+    with _lock:
+        grupo = ninos_activos.pop(gid, None)
+    if not grupo:
+        return jsonify({'ok': False, 'error': 'No encontrado'}), 404
     cancelar_timers(gid)
-    sb_update('registros',{'activo':False},{'id':gid})
+    sb_update('registros', {'activo': False}, {'id': gid})
     enviar_wa(grupo['telefono'], msg_despedida(grupo))
-    return jsonify({'ok':True})
+    return jsonify({'ok': True})
 
 
 @app.route('/api/extender', methods=['POST'])
 def extender():
     data     = request.json
     gid      = data.get('id')
-    servicio = data.get('servicio','combo_1h')
-    pago     = data.get('pago','Efectivo')
-    grupo    = ninos_activos.get(gid)
-    if not grupo: return jsonify({'ok':False,'error':'No encontrado'}), 404
+    servicio = data.get('servicio', 'combo_1h')
+    pago     = data.get('pago', 'Efectivo')
+    with _lock:
+        grupo = ninos_activos.get(gid)
+    if not grupo:
+        return jsonify({'ok': False, 'error': 'No encontrado'}), 404
 
-    srv   = SERVICIOS[servicio]
+    srv = SERVICIOS.get(servicio)
+    if not srv:
+        return jsonify({'ok': False, 'error': 'Servicio inválido'}), 400
+
     cancelar_timers(gid)
-    ahora = datetime.now()
-    grupo.update({'servicio':servicio,'entrada':ahora,
-                  'salida':ahora+timedelta(minutes=srv['minutos']),'pago':pago})
+    ahora        = datetime.now()
+    nueva_salida = ahora + timedelta(minutes=srv['minutos'])
+    with _lock:
+        grupo.update({'servicio': servicio, 'entrada': ahora, 'salida': nueva_salida, 'pago': pago})
     programar_alertas(gid)
-    sb_update('registros',{'servicio':servicio,'salida':grupo['salida'].isoformat(),'pago':pago},{'id':gid})
+    sb_update('registros', {
+        'servicio': servicio, 'entrada': ahora.isoformat(),
+        'salida': nueva_salida.isoformat(), 'pago': pago,
+    }, {'id': gid})
 
     nombres = ', '.join([n['nombre'] for n in grupo['ninos']])
     enviar_wa(grupo['telefono'],
         f"⏱ *Tiempo extendido*\n\n*{nombres}* tiene {srv['nombre']} más.\n"
-        f"🕐 Nueva salida: {hora_legible(grupo['salida'])}\n"
+        f"🕐 Nueva salida: {hora_legible(nueva_salida)}\n"
         f"💰 {pesos(srv['precio'])} — {pago}")
-    return jsonify({'ok':True,'salida':grupo['salida'].isoformat()})
+    return jsonify({'ok': True, 'salida': nueva_salida.isoformat()})
 
 
 @app.route('/api/activos')
 def get_activos():
     ahora = datetime.now()
+    with _lock:
+        snapshot = list(ninos_activos.values())
     resultado = []
-    for gid, g in ninos_activos.items():
+    for g in snapshot:
         salida = g['salida']
-        ms = int((salida-ahora).total_seconds()*1000) if salida else None
+        ms = int((salida - ahora).total_seconds() * 1000) if salida else None
         resultado.append({
-            'id':gid,'servicio':g['servicio'],'acudiente':g['acudiente'],
-            'telefono':g['telefono'],'pago':g['pago'],'ninos':g['ninos'],
-            'precio_total':g['precio_total'],'entrada':g['entrada'].isoformat(),
-            'salida':salida.isoformat() if salida else None,
-            'ms_restantes':max(ms,0) if ms is not None else None,
+            'id': g['id'], 'servicio': g['servicio'], 'acudiente': g['acudiente'],
+            'telefono': g['telefono'], 'pago': g['pago'], 'ninos': g['ninos'],
+            'precio_total': g['precio_total'], 'entrada': g['entrada'].isoformat(),
+            'salida': salida.isoformat() if salida else None,
+            'ms_restantes': max(ms, 0) if ms is not None else None,
         })
     return jsonify(resultado)
 
@@ -484,27 +584,33 @@ def get_historial():
                 .gte('entrada',f'{fecha}T00:00:00').lte('entrada',f'{fecha}T23:59:59')\
                 .order('entrada',desc=True).execute()
             return jsonify(res.data or [])
-        except Exception as e: print(f'[HISTORIAL] {e}')
+        except Exception as e:
+            log.error('[HISTORIAL] %s', e)
     return jsonify([])
 
 
 @app.route('/api/kpis')
 def get_kpis():
     fecha = datetime.now().strftime('%Y-%m-%d')
-    tv=tn=ef=tr=0
+    tv = tn = ef = tr = 0
     if supabase:
         try:
-            res = supabase.table('registros').select('precio_total,pago,ninos')\
-                .gte('entrada',f'{fecha}T00:00:00').execute()
+            res = supabase.table('registros').select('precio_total,pago,ninos') \
+                .gte('entrada', f'{fecha}T00:00:00').execute()
             for r in (res.data or []):
                 tv += r['precio_total'] or 0
-                nl = r['ninos'] if isinstance(r['ninos'],list) else json.loads(r['ninos'] or '[]')
+                nl = r['ninos'] if isinstance(r['ninos'], list) else json.loads(r['ninos'] or '[]')
                 tn += len(nl)
-                if r['pago']=='Efectivo': ef += r['precio_total'] or 0
-                else: tr += r['precio_total'] or 0
-        except Exception as e: print(f'[KPIS] {e}')
-    return jsonify({'total_ventas':tv,'total_ninos':tn,'activos_ahora':len(ninos_activos),
-                    'efectivo':ef,'transferencia':tr,'alertas':alertas_stock_db()})
+                if r['pago'] == 'Efectivo':
+                    ef += r['precio_total'] or 0
+                else:
+                    tr += r['precio_total'] or 0
+        except Exception as e:
+            log.error('[KPIS] %s', e)
+    with _lock:
+        activos_count = len(ninos_activos)
+    return jsonify({'total_ventas': tv, 'total_ninos': tn, 'activos_ahora': activos_count,
+                    'efectivo': ef, 'transferencia': tr, 'alertas': alertas_stock_db()})
 
 
 @app.route('/api/inventario')
@@ -512,27 +618,33 @@ def get_inventario():
     if supabase:
         try:
             res = supabase.table('inventario').select('*').order('producto').execute()
-            inv = {r['producto']:{'cantidad':r['cantidad'],'umbral':r['umbral_alerta']} for r in (res.data or [])}
+            inv = {r['producto']: {'cantidad': r['cantidad'], 'umbral': r['umbral_alerta']} for r in (res.data or [])}
             return jsonify(inv)
-        except Exception as e: print(f'[INV GET] {e}')
-    return jsonify({'manillas':{'cantidad':100,'umbral':10},'pinturas':{'cantidad':50,'umbral':10}})
+        except Exception as e:
+            log.error('[INV GET] %s', e)
+    return jsonify({'manillas': {'cantidad': 100, 'umbral': 10}, 'pinturas': {'cantidad': 50, 'umbral': 10}})
 
 @app.route('/api/inventario/agregar', methods=['POST'])
 def agregar_stock():
-    data     = request.json
-    tipo     = data.get('tipo')
-    cantidad = int(data.get('cantidad',0))
-    personaje= data.get('personaje','').lower().strip()
-    producto = f'dibujo_{personaje}' if tipo=='dibujo' and personaje else tipo
+    data      = request.json
+    tipo      = data.get('tipo')
+    cantidad  = int(data.get('cantidad', 0))
+    personaje = data.get('personaje', '').lower().strip()
+    producto  = f'dibujo_{personaje}' if tipo == 'dibujo' and personaje else tipo
     if supabase:
         try:
-            res = supabase.table('inventario').select('cantidad').eq('producto',producto).execute()
+            res = supabase.table('inventario').select('cantidad').eq('producto', producto).execute()
             if res.data:
-                supabase.table('inventario').update({'cantidad':res.data[0]['cantidad']+cantidad,'updated_at':datetime.now().isoformat()}).eq('producto',producto).execute()
+                supabase.table('inventario').update(
+                    {'cantidad': res.data[0]['cantidad'] + cantidad, 'updated_at': datetime.now().isoformat()}
+                ).eq('producto', producto).execute()
             else:
-                supabase.table('inventario').insert({'producto':producto,'cantidad':cantidad,'umbral_alerta':5}).execute()
-        except Exception as e: print(f'[INV ADD] {e}')
-    return jsonify({'ok':True})
+                supabase.table('inventario').insert(
+                    {'producto': producto, 'cantidad': cantidad, 'umbral_alerta': 5}
+                ).execute()
+        except Exception as e:
+            log.error('[INV ADD] %s', e)
+    return jsonify({'ok': True})
 
 
 @app.route('/api/gastos', methods=['GET'])
@@ -540,26 +652,30 @@ def get_gastos():
     fecha = request.args.get('fecha', datetime.now().strftime('%Y-%m-%d'))
     if supabase:
         try:
-            res = supabase.table('gastos').select('*').eq('fecha',fecha).order('created_at',desc=True).execute()
+            res = supabase.table('gastos').select('*').eq('fecha', fecha).order('created_at', desc=True).execute()
             return jsonify(res.data or [])
-        except: pass
+        except Exception as e:
+            log.error('[GASTOS GET] %s', e)
     return jsonify([])
 
 @app.route('/api/gastos', methods=['POST'])
 def agregar_gasto():
     data = request.json
-    sb_insert('gastos',{'categoria':data.get('categoria'),'descripcion':data.get('descripcion'),
-                         'valor':int(data.get('valor',0)),'fecha':data.get('fecha',datetime.now().strftime('%Y-%m-%d'))})
-    return jsonify({'ok':True})
+    sb_insert('gastos', {
+        'categoria': data.get('categoria'), 'descripcion': data.get('descripcion'),
+        'valor': int(data.get('valor', 0)), 'fecha': data.get('fecha', datetime.now().strftime('%Y-%m-%d')),
+    })
+    return jsonify({'ok': True})
 
 
 @app.route('/api/clientes')
 def get_clientes():
     if supabase:
         try:
-            res = supabase.table('clientes').select('*').order('visitas',desc=True).execute()
+            res = supabase.table('clientes').select('*').order('visitas', desc=True).execute()
             return jsonify(res.data or [])
-        except Exception as e: print(f'[CLIENTES] {e}')
+        except Exception as e:
+            log.error('[CLIENTES] %s', e)
     return jsonify([])
 
 
@@ -569,7 +685,8 @@ def get_eventos():
         try:
             res = supabase.table('eventos').select('*').order('created_at',desc=True).execute()
             return jsonify(res.data or [])
-        except: pass
+        except Exception as e:
+            log.error('[EVENTOS GET] %s', e)
     return jsonify([])
 
 @app.route('/api/eventos', methods=['POST'])
@@ -593,16 +710,22 @@ def actualizar_evento(evento_id):
 @app.route('/api/reportes/mes')
 def reporte_mes():
     mes = request.args.get('mes', datetime.now().strftime('%Y-%m'))
-    if not supabase: return jsonify({'ventas':[],'gastos':[],'eventos':[]})
+    if not supabase:
+        return jsonify({'ventas': [], 'gastos': [], 'eventos': []})
     try:
-        inicio=f'{mes}-01T00:00:00'; fin=f'{mes}-31T23:59:59'
-        ventas  = supabase.table('registros').select('*').gte('entrada',inicio).lte('entrada',fin).execute().data or []
-        gastos  = supabase.table('gastos').select('*').gte('fecha',f'{mes}-01').lte('fecha',f'{mes}-31').execute().data or []
-        eventos = supabase.table('eventos').select('*').gte('fecha_evento',f'{mes}-01').lte('fecha_evento',f'{mes}-31').execute().data or []
-        return jsonify({'ventas':ventas,'gastos':gastos,'eventos':eventos})
+        year, month = int(mes[:4]), int(mes[5:7])
+        ultimo_dia = monthrange(year, month)[1]
+        inicio = f'{mes}-01T00:00:00'
+        fin    = f'{mes}-{ultimo_dia:02d}T23:59:59'
+        fecha_ini = f'{mes}-01'
+        fecha_fin = f'{mes}-{ultimo_dia:02d}'
+        ventas  = supabase.table('registros').select('*').gte('entrada', inicio).lte('entrada', fin).execute().data or []
+        gastos  = supabase.table('gastos').select('*').gte('fecha', fecha_ini).lte('fecha', fecha_fin).execute().data or []
+        eventos = supabase.table('eventos').select('*').gte('fecha_evento', fecha_ini).lte('fecha_evento', fecha_fin).execute().data or []
+        return jsonify({'ventas': ventas, 'gastos': gastos, 'eventos': eventos})
     except Exception as e:
-        print(f'[REPORTE] {e}')
-        return jsonify({'ventas':[],'gastos':[],'eventos':[]})
+        log.error('[REPORTE] %s', e)
+        return jsonify({'ventas': [], 'gastos': [], 'eventos': []})
 
 
 # ================================================================
@@ -611,35 +734,55 @@ def reporte_mes():
 
 @app.route('/api/webhook-wa', methods=['POST'])
 def webhook_wa():
-    body  = request.form.get('Body','').strip()
-    from_ = request.form.get('From','')
-    tel   = from_.replace('whatsapp:+57','').replace('whatsapp:+','').replace('whatsapp:','')
+    # ── Validar firma de Twilio para rechazar requests no autorizados ──
+    if twilio and TWILIO_TOKEN:
+        validator = RequestValidator(TWILIO_TOKEN)
+        url = request.url
+        signature = request.headers.get('X-Twilio-Signature', '')
+        if not validator.validate(url, request.form, signature):
+            log.warning('[WEBHOOK] Firma Twilio inválida — request rechazado')
+            return '<Response></Response>', 403, {'Content-Type': 'text/xml'}
 
-    # Buscar grupo activo de este número
-    grupo = next(
-        (g for g in ninos_activos.values() if tel in g['telefono'].replace(' ','')),
-        None
-    )
+    body  = request.form.get('Body', '').strip()
+    from_ = request.form.get('From', '')
+    tel   = normalizar_telefono(from_)
+
+    # Buscar grupo activo de este número (comparando número normalizado)
+    with _lock:
+        grupo = next(
+            (g for g in ninos_activos.values()
+             if normalizar_telefono(g['telefono']) == tel),
+            None,
+        )
 
     # ── Respuestas numéricas (1 = continuar, 2 = retirar) ──
     if body == '1' and grupo:
-        srv = SERVICIOS[grupo['servicio']]
-        cancelar_timers(grupo['id'])
-        ahora = datetime.now()
-        grupo['entrada'] = ahora
-        grupo['salida']  = ahora + timedelta(minutes=srv['minutos'])
-        programar_alertas(grupo['id'])
-        nombres = ', '.join([n['nombre'] for n in grupo['ninos']])
-        enviar_wa(grupo['telefono'],
-            f"⏱ *Tiempo renovado*\n\n*{nombres}* tiene {srv['nombre']} más.\n"
-            f"🕐 Nueva salida: {hora_legible(grupo['salida'])}\n"
-            f"💰 {pesos(srv['precio'])} adicionales — acérquese a cancelar.")
+        srv = SERVICIOS.get(grupo['servicio'])
+        if srv and srv.get('minutos'):
+            cancelar_timers(grupo['id'])
+            ahora = datetime.now()
+            nueva_salida = ahora + timedelta(minutes=srv['minutos'])
+            with _lock:
+                grupo['entrada'] = ahora
+                grupo['salida']  = nueva_salida
+            # Persistir en BD
+            sb_update('registros', {
+                'entrada': ahora.isoformat(),
+                'salida': nueva_salida.isoformat(),
+            }, {'id': grupo['id']})
+            programar_alertas(grupo['id'])
+            nombres = ', '.join([n['nombre'] for n in grupo['ninos']])
+            enviar_wa(grupo['telefono'],
+                f"⏱ *Tiempo renovado*\n\n*{nombres}* tiene {srv['nombre']} más.\n"
+                f"🕐 Nueva salida: {hora_legible(nueva_salida)}\n"
+                f"💰 {pesos(srv['precio'])} adicionales — acérquese a cancelar.")
 
     elif body == '2' and grupo:
         gid = grupo['id']
         cancelar_timers(gid)
-        ninos_activos.pop(gid, None)
-        sb_update('registros',{'activo':False},{'id':gid})
+        with _lock:
+            ninos_activos.pop(gid, None)
+        sb_update('registros', {'activo': False}, {'id': gid})
         enviar_wa(grupo['telefono'], msg_despedida(grupo))
 
     else:
@@ -647,19 +790,22 @@ def webhook_wa():
         def responder_async():
             respuesta = respuesta_agente(tel, body)
             enviar_wa(tel, respuesta)
-        threading.Thread(target=responder_async).start()
+        t = threading.Thread(target=responder_async, daemon=True)
+        t.start()
 
-    return '<Response></Response>', 200, {'Content-Type':'text/xml'}
+    return '<Response></Response>', 200, {'Content-Type': 'text/xml'}
 
 
 # ================================================================
 #  ARRANQUE
 # ================================================================
 
+cargar_sesiones_activas()
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 3000))
-    print(f'🎪 Inflaboom + Agente IA arrancando en puerto {port}')
-    print(f'   Claude: {"✅ conectado" if claude else "⚠ no configurado"}')
-    print(f'   Supabase: {"✅ conectado" if supabase else "⚠ no configurado"}')
-    print(f'   Twilio: {"✅ conectado" if twilio else "⚠ no configurado"}')
+    log.info('Inflaboom + Agente IA arrancando en puerto %d', port)
+    log.info('  Claude:   %s', '✅ conectado' if claude else '⚠ no configurado')
+    log.info('  Supabase: %s', '✅ conectado' if supabase else '⚠ no configurado')
+    log.info('  Twilio:   %s', '✅ conectado' if twilio else '⚠ no configurado')
     app.run(host='0.0.0.0', port=port, debug=False)
