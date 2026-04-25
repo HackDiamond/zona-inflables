@@ -230,7 +230,11 @@ def login():
         u = res.data[0]
         if not u.get('activo', True):
             return jsonify({'ok': False, 'error': 'Usuario o contraseña incorrectos'}), 401
-        if not check_password_hash(u['password_hash'], password):
+        stored = u['password_hash']
+        if stored.startswith('PLAIN:'):
+            if stored[6:] != password:
+                return jsonify({'ok': False, 'error': 'Usuario o contraseña incorrectos'}), 401
+        elif not check_password_hash(stored, password):
             return jsonify({'ok': False, 'error': 'Usuario o contraseña incorrectos'}), 401
         session.permanent = True
         session['usuario_id'] = u['id']
