@@ -366,6 +366,39 @@ def app_cliente(telefono, token):
     with open(path, 'r', encoding='utf-8') as f: html = f.read()
     return Response(html, content_type='text/html; charset=utf-8')
 
+# ── NUEVA API: DATOS EXCLUSIVOS PARA PWA CLIENTE ──
+@app.route('/api/app-cliente/datos/<telefono>/<token>')
+def api_cliente_datos(telefono, token):
+    if token != generar_token_cliente(telefono):
+        return jsonify({'ok': False, 'error': 'Enlace inválido o expirado'}), 403
+
+    visitas = 0
+    nombre_cliente = "Cliente VIP"
+    if supabase:
+        try:
+            res = supabase.table('clientes').select('visitas,nombre').eq('telefono', telefono).execute()
+            if res.data:
+                visitas = res.data[0]['visitas']
+                nombre_cliente = res.data[0]['nombre']
+        except Exception as e:
+            log.error('[API CLIENTE PWA] %s', e)
+
+    activos_cliente = []
+    ahora = datetime.now()
+    with _lock:
+        for g in ninos_activos.values():
+            if normalizar_telefono(g['telefono']).replace('+57', '') == telefono:
+                for l in g.get('lineas', []):
+                    if not l.get('activa', True): continue
+                    ms = max(0, int((datetime.fromisoformat(l['salida']) - ahora).total_seconds() * 1000)) if l.get('salida') else None
+                    activos_cliente.append({
+                        'nombre': l['nombre'],
+                        'combo': l['combo'],
+                        'ms_restantes': ms
+                    })
+
+    return jsonify({'ok': True, 'nombre': nombre_cliente, 'visitas': visitas, 'activos': activos_cliente})
+    
 # ── CIERRE DE CAJA ──
 @app.route('/api/resumen-dia', methods=['POST'])
 @api_key_required
