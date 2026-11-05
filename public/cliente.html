@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Mi Inflaboom</title>
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Poppins:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root { --bg: #0E0E10; --primary: #7B1FE4; --cyan: #19C7F7; --yellow: #FFD43B; --text: #FFFFFF; --card: #1A1A1F; }
+        body { margin: 0; background: var(--bg); color: var(--text); font-family: 'Poppins', sans-serif; padding-bottom: 20px; }
+        h1, h2, h3 { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; margin: 0; }
+        .header { background: linear-gradient(135deg, var(--primary), #3b0975); padding: 20px; text-align: center; border-bottom: 3px solid var(--cyan); box-shadow: 0 4px 15px rgba(25, 199, 247, 0.2); }
+        .header h1 { font-size: 2.5rem; color: var(--yellow); text-shadow: 2px 2px 0px #000; }
+        .container { padding: 20px; }
+        .card { background: var(--card); border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); border: 1px solid #2A2A35; }
+        .card h2 { color: var(--cyan); font-size: 1.8rem; border-bottom: 1px solid #2A2A35; padding-bottom: 10px; margin-bottom: 15px; }
+        
+        /* Sistema de Sellos */
+        .sellos-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-top: 15px; }
+        .sello { width: 100%; aspect-ratio: 1; background: #2A2A35; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: bold; color: #555; position: relative; }
+        .sello.activo { background: var(--primary); color: #fff; box-shadow: 0 0 10px var(--primary); }
+        .sello.premio { border: 2px solid var(--yellow); }
+        .sello.premio.activo { background: var(--yellow); color: #000; box-shadow: 0 0 15px var(--yellow); }
+        .premio-texto { text-align: center; margin-top: 15px; font-size: 0.9rem; color: #aaa; }
+        .premio-texto strong { color: var(--yellow); }
+
+        /* Activos */
+        .nino-activo { background: #22222A; padding: 15px; border-radius: 8px; margin-bottom: 10px; border-left: 4px solid var(--cyan); display: flex; justify-content: space-between; align-items: center;}
+        .nino-info h3 { font-size: 1.5rem; color: #fff; }
+        .nino-info p { margin: 5px 0 0 0; font-size: 0.85rem; color: #aaa; }
+        .timer { font-family: 'Bebas Neue', sans-serif; font-size: 2.2rem; color: var(--yellow); }
+        .timer.rojo { color: #FF4444; animation: parpadeo 1s infinite; }
+        @keyframes parpadeo { 50% { opacity: 0.5; } }
+
+        .btn { display: block; width: 100%; padding: 15px; text-align: center; background: var(--cyan); color: #000; font-family: 'Bebas Neue', sans-serif; font-size: 1.5rem; border: none; border-radius: 8px; cursor: pointer; text-decoration: none; margin-top: 10px; box-shadow: 0 4px 0 #0f8bb0; transition: transform 0.1s; }
+        .btn:active { transform: translateY(4px); box-shadow: 0 0 0 #0f8bb0; }
+        .btn-outline { background: transparent; border: 2px solid var(--primary); color: #fff; box-shadow: none; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>INFLABOOM</h1>
+        <div id="saludo">Cargando tu perfil...</div>
+    </div>
+
+    <div class="container">
+        <!-- Niños Activos -->
+        <div class="card" id="card-activos" style="display: none;">
+            <h2>⚡ TIEMPO EN VIVO</h2>
+            <div id="lista-activos"></div>
+            <!-- REEMPLAZA EL NUMERO ABAJO -->
+            <a href="https://wa.me/573106673743?text=1" class="btn" id="btn-extender">⏱ EXTENDER TIEMPO</a>
+            <p style="text-align: center; font-size: 0.8rem; color: #888; margin-top: 10px;">Serás redirigido a WhatsApp para confirmar.</p>
+        </div>
+
+        <!-- Tiquete Ganador -->
+        <div class="card">
+            <h2>🎟️ TIQUETE GANADOR</h2>
+            <p style="font-size: 0.9rem; color: #ccc;">Acumula sellos por cada visita y desbloquea premios.</p>
+            <div class="sellos-grid" id="grid-sellos"></div>
+            <div class="premio-texto" id="texto-premio">Calculando tu próximo premio...</div>
+        </div>
+        
+        <!-- REEMPLAZA EL NUMERO ABAJO -->
+        <a href="https://wa.me/573106673743?text=Quiero%20ver%20la%20jugueteria" class="btn btn-outline">🧸 VER JUGUETERÍA</a>
+    </div>
+
+    <script>
+        // Extraer telefono y token de la URL
+        const path = window.location.pathname.split('/');
+        const telefono = path[3];
+        const token = path[4];
+
+        // ⚠️ CAMBIA ESTO POR EL NÚMERO REAL DEL PARQUE
+        const numeroParque = '573106673743'; 
+        document.getElementById('btn-extender').href = `https://wa.me/${numeroParque}?text=1`;
+
+        async function cargarDatos() {
+            try {
+                const res = await fetch(`/api/app-cliente/datos/${telefono}/${token}`);
+                const data = await res.json();
+                
+                if(!data.ok) {
+                    document.body.innerHTML = `<div style="padding: 20px; text-align: center; margin-top: 50px;"><h2 style="color:#FF4444;">${data.error}</h2><p>Pide un nuevo enlace en la caja.</p></div>`;
+                    return;
+                }
+
+                document.getElementById('saludo').innerText = `Hola, ${data.nombre} 👋`;
+                renderSellos(data.visitas);
+                renderActivos(data.activos);
+                
+            } catch (err) {
+                console.error("Error cargando datos:", err);
+            }
+        }
+
+        function renderSellos(visitas) {
+            const grid = document.getElementById('grid-sellos');
+            const texto = document.getElementById('texto-premio');
+            grid.innerHTML = '';
+            
+            const meta = 18; 
+            let html = '';
+            for(let i = 1; i <= meta; i++) {
+                let esPremio = (i===4 || i===8 || i===12 || i===18);
+                let clase = `sello ${i <= visitas ? 'activo' : ''} ${esPremio ? 'premio' : ''}`;
+                let icono = esPremio && i <= visitas ? '⭐' : (esPremio ? '🎁' : i);
+                html += `<div class="${clase}">${icono}</div>`;
+            }
+            grid.innerHTML = html;
+
+            if (visitas < 4) texto.innerHTML = `Faltan <strong>${4 - visitas} visitas</strong> para 1 HORA EXTRA GRATIS`;
+            else if (visitas < 8) texto.innerHTML = `Faltan <strong>${8 - visitas} visitas</strong> para 1 ENTRADA GRATIS`;
+            else if (visitas < 12) texto.innerHTML = `Faltan <strong>${12 - visitas} visitas</strong> para 1 HORA DE TRAMPOLÍN`;
+            else if (visitas < 18) texto.innerHTML = `Faltan <strong>${18 - visitas} visitas</strong> para 50% DESC. ALQUILER`;
+            else texto.innerHTML = `¡Eres cliente VIP nivel máximo! ⭐`;
+        }
+
+        function renderActivos(activos) {
+            const card = document.getElementById('card-activos');
+            const lista = document.getElementById('lista-activos');
+            
+            if (!activos || activos.length === 0) {
+                card.style.display = 'none';
+                return;
+            }
+
+            card.style.display = 'block';
+            lista.innerHTML = '';
+
+            activos.forEach((nino) => {
+                let div = document.createElement('div');
+                div.className = 'nino-activo';
+                
+                let minRestantes = nino.ms_restantes ? Math.ceil(nino.ms_restantes / 60000) : null;
+                let textoTiempo = minRestantes !== null ? `${minRestantes} MIN` : 'LIBRE';
+                let claseTimer = minRestantes !== null && minRestantes <= 5 ? 'rojo' : '';
+
+                div.innerHTML = `
+                    <div class="nino-info">
+                        <h3>${nino.nombre}</h3>
+                        <p>${nino.combo}</p>
+                    </div>
+                    <div class="timer ${claseTimer}">${textoTiempo}</div>
+                `;
+                lista.appendChild(div);
+            });
+        }
+
+        // Iniciar carga de datos y refresco automático cada 15 segundos
+        cargarDatos();
+        setInterval(cargarDatos, 15000);
+    </script>
+</body>
+</html>
