@@ -243,7 +243,11 @@ textarea{resize:none;height:50px}
   <!-- Datos acudiente -->
   <div class="fgrid f2">
     <div class="fg"><label>Nombre acudiente</label><input id="f-acudiente" type="text" placeholder="Ej: Laura García" oninput="updatePreview()"></div>
-    <div class="fg"><label>Teléfono WhatsApp *</label><input id="f-tel" type="tel" placeholder="3001234567"></div>
+   <div class="fg">
+      <label>Teléfono WhatsApp *</label>
+      <input id="f-tel" type="tel" placeholder="3001234567">
+      <div id="info-sellos-caja" style="margin-top: 5px; font-size: 0.9rem; font-weight: bold; min-height: 20px;"></div>
+  </div>
   </div>
   <div class="fgrid f2">
     <div class="fg"><label>Método de pago</label>
@@ -1644,6 +1648,40 @@ async function ajustarStock(codigo, nombre, stockActual){
 
 // Cargar catálogo al entrar a Config
 const _tabOriginal = tab;
+</script>
+<script>
+    const inputTel = document.getElementById('f-tel');
+    const divSellos = document.getElementById('info-sellos-caja');
+
+    if (inputTel && divSellos) {
+        inputTel.addEventListener('input', async (e) => {
+            const tel = e.target.value.trim();
+            
+            // Cuando el cajero digita exactamente 10 números
+            if (tel.length === 10) { 
+                divSellos.innerHTML = '<span style="color:#19C7F7;">⏳ Buscando cliente...</span>';
+                try {
+                    const res = await fetch(`/api/admin/cliente/${tel}`);
+                    const data = await res.json();
+                    
+                    if (data.visitas > 0) {
+                        let mensaje = `⭐ ${data.nombre}: ${data.visitas} visitas.`;
+                        if (data.visitas < 4) mensaje += ` ¡Faltan ${4 - data.visitas} para HORA GRATIS!`;
+                        else if (data.visitas < 8) mensaje += ` ¡Faltan ${8 - data.visitas} para ENTRADA GRATIS!`;
+                        else mensaje += ` ¡Cliente VIP!`;
+                        
+                        divSellos.innerHTML = `<span style="color:#FFD43B;">${mensaje}</span>`;
+                    } else {
+                        divSellos.innerHTML = '<span style="color:#aaa;">👋 Cliente nuevo</span>';
+                    }
+                } catch (err) {
+                    divSellos.innerHTML = ''; // Falla de red silenciosa
+                }
+            } else {
+                divSellos.innerHTML = ''; // Limpia al borrar
+            }
+        });
+    }
 </script>
 </body>
 </html>

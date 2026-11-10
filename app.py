@@ -664,6 +664,17 @@ def webhook_wa():
 
     return jsonify({'ok': True})
 
+# ── API ADMIN: CONSULTA RÁPIDA DE CLIENTE (CAJA) ──
+@app.route('/api/admin/cliente/<telefono>')
+def admin_cliente(telefono):
+    if not supabase: return jsonify({'visitas': 0, 'nombre': ''})
+    try:
+        res = supabase.table('clientes').select('visitas,nombre').eq('telefono', telefono).execute()
+        if res.data:
+            return jsonify({'visitas': res.data[0]['visitas'], 'nombre': res.data[0]['nombre']})
+    except Exception as e:
+        log.error('[API ADMIN CLIENTE] %s', e)
+    return jsonify({'visitas': 0, 'nombre': ''})
 cargar_sesiones_activas()
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=3000)
