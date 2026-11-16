@@ -97,14 +97,14 @@ def home():
 def static_files(path):
     return send_from_directory('public', path)
 
-EVO_API_URL     = os.environ.get('EVO_API_URL', '')
-EVO_API_KEY     = os.environ.get('EVO_API_KEY', '')
-EVO_INSTANCE    = os.environ.get('EVO_INSTANCE', 'inflaboom')
-SUPABASE_URL    = os.environ.get('SUPABASE_URL', '')
-SUPABASE_KEY    = os.environ.get('SUPABASE_KEY', '')
-ANTHROPIC_KEY   = os.environ.get('ANTHROPIC_API_KEY', '')
-API_KEY         = os.environ.get('API_KEY', 'inflaboom123')
-DUENO_WA        = os.environ.get('DUENO_WA', '+573000000000')
+EVO_API_URL     = os.environ.get('EVO_API_URL', '').strip()
+EVO_API_KEY     = os.environ.get('EVO_API_KEY', '').strip()
+EVO_INSTANCE    = os.environ.get('EVO_INSTANCE', 'inflaboom').strip()
+SUPABASE_URL    = os.environ.get('SUPABASE_URL', '').strip()
+SUPABASE_KEY    = os.environ.get('SUPABASE_KEY', '').strip()
+ANTHROPIC_KEY   = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+API_KEY         = os.environ.get('API_KEY', 'inflaboom123').strip()
+DUENO_WA        = os.environ.get('DUENO_WA', '+573000000000').strip()
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL else None
 claude   = anthropic.Anthropic(api_key=ANTHROPIC_KEY) if ANTHROPIC_KEY else None
@@ -433,28 +433,32 @@ def registrar():
     acudiente, telefono, pago, ninos = data.get('acudiente', ''), data.get('telefono', ''), data.get('pago', 'Efectivo'), data.get('ninos', [])
     if not telefono or not ninos: return jsonify({'ok': False, 'error': 'Faltan campos obligatorios'}), 400
 
-    ahora, venta_id, precio_total, lineas = datetime.now(), str(int(datetime.now().timestamp() * 1000)), 0, []
-    for n in ninos:
-        srv = SERVICIOS[n['servicio']]
-        minutos, precio = srv.get('minutos'), srv['precio']
-        salida = (ahora + timedelta(minutes=minutos)).isoformat() if minutos else None
-        precio_total += precio
-        lineas.append({'id': f"{venta_id}_{len(lineas)+1}", 'venta_id': venta_id, 'nombre': n.get('nombre', ''), 'servicio': n['servicio'], 'combo': srv['nombre'], 'categoria': srv.get('categoria', 'juegos'), 'minutos': minutos, 'precio': precio, 'salida': salida, 'dibujo': n.get('dibujo', ''), 'activa': True})
+    try:
+        ahora, venta_id, precio_total, lineas = datetime.now(), str(int(datetime.now().timestamp() * 1000)), 0, []
+        for n in ninos:
+            srv = SERVICIOS[n['servicio']]
+            minutos, precio = srv.get('minutos'), srv['precio']
+            salida = (ahora + timedelta(minutes=minutos)).isoformat() if minutos else None
+            precio_total += precio
+            lineas.append({'id': f"{venta_id}_{len(lineas)+1}", 'venta_id': venta_id, 'nombre': n.get('nombre', ''), 'servicio': n['servicio'], 'combo': srv['nombre'], 'categoria': srv.get('categoria', 'juegos'), 'minutos': minutos, 'precio': precio, 'salida': salida, 'dibujo': n.get('dibujo', ''), 'activa': True})
 
-    salidas_validas = [datetime.fromisoformat(l['salida']) for l in lineas if l['salida']]
-    salida_grupo = max(salidas_validas) if salidas_validas else None
-    venta = {'id': venta_id, 'acudiente': acudiente, 'telefono': telefono, 'pago': pago, 'lineas': lineas, 'precio_total': precio_total, 'entrada': ahora, 'salida': salida_grupo, 'activo': True}
+        salidas_validas = [datetime.fromisoformat(l['salida']) for l in lineas if l['salida']]
+        salida_grupo = max(salidas_validas) if salidas_validas else None
+        venta = {'id': venta_id, 'acudiente': acudiente, 'telefono': telefono, 'pago': pago, 'lineas': lineas, 'precio_total': precio_total, 'entrada': ahora, 'salida': salida_grupo, 'activo': True}
 
-    with _lock: ninos_activos[venta_id] = venta
+        with _lock: ninos_activos[venta_id] = venta
 
-    sb_insert('registros', {'id': venta_id, 'acudiente': acudiente, 'telefono': telefono, 'pago': pago, 'ninos': lineas, 'precio_total': precio_total, 'entrada': ahora.isoformat(), 'salida': salida_grupo.isoformat() if salida_grupo else None, 'activo': True, 'servicio': lineas[0]['servicio'] if lineas else '', 'cliente_telefono': telefono or None, 'costo_estimado': 0})
-    descontar_inventario_db(lineas[0]['servicio'], lineas)
-    venta['visitas'] = registrar_cliente_db(telefono, acudiente, precio_total)
-    
-    programar_alertas(venta_id)
-    enviar_wa(telefono, msg_bienvenida(venta))
-    threading.Timer(2.0, lambda: enviar_wa(telefono, msg_recibo(venta))).start()
-    return jsonify({'ok': True, 'id': venta_id, 'lineas': lineas, 'precio_total': precio_total, 'alertas': alertas_stock_db()})
+        venta['visitas'] = registrar_cliente_db(telefono, acudiente, precio_total)
+        sb_insert('registros', {'id': venta_id, 'acudiente': acudiente, 'telefono': telefono, 'pago': pago, 'ninos': lineas, 'precio_total': precio_total, 'entrada': ahora.isoformat(), 'salida': salida_grupo.isoformat() if salida_grupo else None, 'activo': True, 'servicio': lineas[0]['servicio'] if lineas else '', 'cliente_telefono': telefono or None, 'costo_estimado': 0})
+        descontar_inventario_db(lineas[0]['servicio'], lineas)
+
+        programar_alertas(venta_id)
+        enviar_wa(telefono, msg_bienvenida(venta))
+        threading.Timer(2.0, lambda: enviar_wa(telefono, msg_recibo(venta))).start()
+        return jsonify({'ok': True, 'id': venta_id, 'lineas': lineas, 'precio_total': precio_total, 'alertas': alertas_stock_db()})
+    except Exception as e:
+        log.error('[REGISTRAR] %s', e)
+        return jsonify({'ok': False, 'error': str(e)}), 500
 
 @app.route('/api/agregar-linea', methods=['POST'])
 @api_key_required
@@ -559,30 +563,38 @@ def get_historial():
 @app.route('/api/kpis')
 @api_key_required
 def get_kpis():
-    fecha = datetime.now().strftime('%Y-%m-%d')
-    tv = tn = ef = tr = 0
-    if supabase:
-        res = supabase.table('registros').select('precio_total,pago,ninos').gte('entrada', f'{fecha}T00:00:00').execute()
-        for r in (res.data or []):
-            tv += r['precio_total'] or 0
-            tn += len(json.loads(r['ninos']) if isinstance(r['ninos'], str) else r['ninos'])
-            if r['pago'] == 'Efectivo': ef += r['precio_total'] or 0
-            else: tr += r['precio_total'] or 0
-    with _lock: activos_count = len(ninos_activos)
-    return jsonify({'total_ventas': tv, 'total_ninos': tn, 'activos_ahora': activos_count, 'efectivo': ef, 'transferencia': tr, 'alertas': alertas_stock_db()})
+    try:
+        fecha = datetime.now().strftime('%Y-%m-%d')
+        tv = tn = ef = tr = 0
+        if supabase:
+            res = supabase.table('registros').select('precio_total,pago,ninos').gte('entrada', f'{fecha}T00:00:00').execute()
+            for r in (res.data or []):
+                tv += r['precio_total'] or 0
+                tn += len(json.loads(r['ninos']) if isinstance(r['ninos'], str) else r['ninos'])
+                if r['pago'] == 'Efectivo': ef += r['precio_total'] or 0
+                else: tr += r['precio_total'] or 0
+        with _lock: activos_count = len(ninos_activos)
+        return jsonify({'total_ventas': tv, 'total_ninos': tn, 'activos_ahora': activos_count, 'efectivo': ef, 'transferencia': tr, 'alertas': alertas_stock_db()})
+    except Exception as e:
+        log.error('[KPIS] %s', e)
+        return jsonify({'ok': False, 'error': str(e)}), 500
 
 @app.route('/api/utilidad-dia')
 @api_key_required
 def get_utilidad_dia():
-    fecha = request.args.get('fecha', datetime.now().strftime('%Y-%m-%d'))
-    ingresos, gastos_total, gastos_lista = 0, 0, []
-    if supabase:
-        res = supabase.table('registros').select('precio_total').gte('entrada', f'{fecha}T00:00:00').lte('entrada', f'{fecha}T23:59:59').execute()
-        ingresos = sum(r.get('precio_total', 0) or 0 for r in (res.data or []))
-        res2 = supabase.table('gastos').select('*').eq('fecha', fecha).execute()
-        gastos_lista, gastos_total = res2.data or [], sum(g.get('valor', 0) or 0 for g in (res2.data or []))
-    utilidad = ingresos - gastos_total
-    return jsonify({'ingresos': ingresos, 'gastos': gastos_total, 'utilidad': utilidad, 'margen': round(utilidad / ingresos * 100, 1) if ingresos > 0 else 0, 'gastos_detalle': gastos_lista})
+    try:
+        fecha = request.args.get('fecha', datetime.now().strftime('%Y-%m-%d'))
+        ingresos, gastos_total, gastos_lista = 0, 0, []
+        if supabase:
+            res = supabase.table('registros').select('precio_total').gte('entrada', f'{fecha}T00:00:00').lte('entrada', f'{fecha}T23:59:59').execute()
+            ingresos = sum(r.get('precio_total', 0) or 0 for r in (res.data or []))
+            res2 = supabase.table('gastos').select('*').eq('fecha', fecha).execute()
+            gastos_lista, gastos_total = res2.data or [], sum(g.get('valor', 0) or 0 for g in (res2.data or []))
+        utilidad = ingresos - gastos_total
+        return jsonify({'ingresos': ingresos, 'gastos': gastos_total, 'utilidad': utilidad, 'margen': round(utilidad / ingresos * 100, 1) if ingresos > 0 else 0, 'gastos_detalle': gastos_lista})
+    except Exception as e:
+        log.error('[UTILIDAD_DIA] %s', e)
+        return jsonify({'ok': False, 'error': str(e)}), 500
 
 @app.route('/api/inventario', methods=['GET'])
 @api_key_required

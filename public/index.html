@@ -1485,13 +1485,14 @@ async function confirmarVentaSuelta(){
 }
 
 setInterval(async()=>{
+  if (document.hidden) return;
   await cargarActivos();
   actualizarBadge();
   if(document.getElementById('panel-activos').classList.contains('active')){
     renderActivos();
     cargarUtilidad();
   }
-},15000);
+},30000);
 
 // ── Utilidad del día ──
 async function cargarUtilidad(){
