@@ -193,7 +193,7 @@ def enviar_wa(telefono, mensaje):
         
     url = f"{EVO_API_URL.rstrip('/')}/message/sendText/{EVO_INSTANCE}"
     headers = {"apikey": EVO_API_KEY, "Content-Type": "application/json"}
-    data = {"number": num, "options": {"delay": 1500}, "textMessage": {"text": mensaje}}
+    data = {"number": num, "text": mensaje, "delay": 1500}
     
     try:
         res = requests.post(url, headers=headers, json=data)
